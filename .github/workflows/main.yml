@@ -1,0 +1,95 @@
+name: YouTube Remote Downloader Server
+
+on:
+  workflow_dispatch: # Allows you to trigger this manually
+
+jobs:
+  run-server:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Packages
+        run: |
+          pip install flask yt-dlp requests
+
+      - name: Install Cloudflared
+        run: |
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+
+      - name: Start Flask App and Cloudflare Tunnel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 1. Start the Flask background server
+          cat << 'EOF' > app.py
+          from flask import Flask, request, jsonify, send_file
+          import yt_dlp
+          import os
+
+          app = Flask(__name__)
+
+          @app.route('/info', methods=['POST'])
+          def get_info():
+              data = request.get_json()
+              url = data.get('url')
+              with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+                  info = ydl.extract_info(url, download=False)
+                  return jsonify({
+                      'title': info.get('title'),
+                      'uploader': info.get('uploader'),
+                      'thumbnail': info.get('thumbnail')
+                  })
+
+          @app.route('/download', methods=['POST'])
+          def download():
+              data = request.get_json()
+              url = data.get('url')
+              ydl_opts = {
+                  'format': 'best',
+                  'outtmpl': 'video.%(ext)s',
+                  'quiet': True
+              }
+              if os.path.exists('video.mp4'): os.remove('video.mp4')
+              with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                  info = ydl.extract_info(url, download=True)
+                  filename = ydl.prepare_filename(info)
+                  return send_file(filename, as_attachment=True)
+
+          if __name__ == '__main__':
+              app.run(port=8080)
+          EOF
+          
+          python3 app.py &
+          sleep 3
+
+          # 2. Open Cloudflared Quick Tunnel and capture the dynamic URL
+          cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
+          sleep 8
+          
+          # Extract the unique .trycloudflare.com address from the logs
+          TUNNEL_URL=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" tunnel.log | head -n 1)
+          echo "Tunnel Link Discovered: $TUNNEL_URL"
+          echo "$TUNNEL_URL" > tunnel_url.txt
+
+          # 3. Force-push the updated text file back to GitHub so Apps Script can read it
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add tunnel_url.txt
+          git commit -m "Update active server tunnel link"
+          git push origin HEAD:${{ github.ref }}
+
+          # 4. Keep the job alive for 6 hours (GitHub's maximum job lifetime)
+          sleep 21600
