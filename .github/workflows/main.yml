@@ -3,6 +3,9 @@ name: YouTube Remote Downloader Server
 on:
   workflow_dispatch: # Allows you to trigger this manually
 
+permissions:
+  contents: write
+  
 jobs:
   run-server:
     runs-on: ubuntu-latest
