@@ -88,8 +88,8 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git add tunnel_url.txt
-          git commit -m "Update active server tunnel link"
-          git push origin HEAD:${{ github.ref }}
+          git commit -m "Update active server tunnel link" | true
+          git push origin HEAD:${{ github.ref }} | true
 
           # 4. Keep the job alive for 6 hours (GitHub's maximum job lifetime)
           sleep 21600
