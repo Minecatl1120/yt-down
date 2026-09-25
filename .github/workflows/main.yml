@@ -73,6 +73,8 @@ jobs:
 
           app = Flask(__name__)
 
+          MOBILE_UA = "Mozilla/5.0 (Android 10; Mobile; rv:115.0) Gecko/115.0 Firefox/115.0"
+
           @app.route('/info', methods=['POST'])
           def get_info():
               data = request.get_json()
