@@ -75,24 +75,16 @@ jobs:
 
           app = Flask(__name__)
 
-          MOBILE_UA = "Mozilla/5.0 (Android 10; Mobile; rv:115.0) Gecko/115.0 Firefox/115.0"
-
           @app.route('/info', methods=['POST'])
           def get_info():
               data = request.get_json()
               url = data.get('url')
               
+              # Removed conflicting mobile user-agent and client array overrides
               ydl_opts = {
                   'quiet': True,
-                  'user_agent': MOBILE_UA,
                   'username': 'oauth2', # This instructs the oauth plugin to execute
-                  'password': '',
-                  'extractor_args': {
-                      'youtube': {
-                          'client': ['android_embedded', 'android_vr', 'mweb', 'tvhtml5'],
-                          'skip': ['hls', 'dash']
-                      }
-                  }
+                  'password': ''
               }
               if os.path.exists('cookies.txt'):
                   ydl_opts['cookiefile'] = 'cookies.txt'
@@ -108,7 +100,7 @@ jobs:
               except Exception as e:
                   err_msg = str(e)
                   # If a code needs to be verified, pass the instructions safely to your Apps Script
-                  if "enter code" in err_msg.lower():
+                  if "enter code" in err_msg.lower() or "go to" in err_msg.lower():
                       return jsonify({
                           'status': 'auth_required',
                           'instructions': err_msg.strip()
@@ -120,19 +112,13 @@ jobs:
               data = request.get_json()
               url = data.get('url')
               
+              # Removed conflicting mobile user-agent and client array overrides
               ydl_opts = {
                   'format': 'best',
                   'outtmpl': 'video.%(ext)s',
                   'quiet': True,
-                  'user_agent': MOBILE_UA,
                   'username': 'oauth2', # This instructs the oauth plugin to execute
-                  'password': '',
-                  'extractor_args': {
-                      'youtube': {
-                          'client': ['android_embedded', 'android_vr', 'mweb', 'tvhtml5'],
-                          'skip': ['hls', 'dash']
-                      }
-                  }
+                  'password': ''
               }
               if os.path.exists('cookies.txt'):
                   ydl_opts['cookiefile'] = 'cookies.txt'
@@ -147,7 +133,7 @@ jobs:
                       return send_file(filename, as_attachment=True)
               except Exception as e:
                   err_msg = str(e)
-                  if "enter code" in err_msg.lower():
+                  if "enter code" in err_msg.lower() or "go to" in err_msg.lower():
                       return jsonify({
                           'status': 'auth_required',
                           'instructions': err_msg.strip()
