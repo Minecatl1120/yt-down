@@ -78,7 +78,15 @@ jobs:
               data = request.get_json()
               url = data.get('url')
               
-              ydl_opts = {'quiet': True}
+              ydl_opts = {
+                  'quiet': True,
+                  'user_agent': MOBILE_UA,
+                  'extractor_args': {
+                      'youtube': {
+                          'client': ['mweb'] # Force mobile web player API endpoints
+                      }
+                  }
+              }
               if os.path.exists('cookies.txt'):
                   ydl_opts['cookiefile'] = 'cookies.txt'
 
@@ -98,7 +106,13 @@ jobs:
               ydl_opts = {
                   'format': 'best',
                   'outtmpl': 'video.%(ext)s',
-                  'quiet': True
+                  'quiet': True,
+                  'user_agent': MOBILE_UA,
+                  'extractor_args': {
+                      'youtube': {
+                          'client': ['mweb'] # Force mobile web player API endpoints
+                      }
+                  }
               }
               if os.path.exists('cookies.txt'):
                   ydl_opts['cookiefile'] = 'cookies.txt'
