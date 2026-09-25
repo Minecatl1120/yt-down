@@ -35,7 +35,10 @@ jobs:
       - name: Start Flask App and Cloudflare Tunnel
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
+          echo "$YT_COOKIES" > cookies.txt
+          
           # 1. Start the Flask background server
           cat << 'EOF' > app.py
           from flask import Flask, request, jsonify, send_file
@@ -48,7 +51,12 @@ jobs:
           def get_info():
               data = request.get_json()
               url = data.get('url')
-              with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+              
+              ydl_opts = {'quiet': True}
+              if os.path.exists('cookies.txt'):
+                  ydl_opts['cookiefile'] = 'cookies.txt'
+
+              with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                   info = ydl.extract_info(url, download=False)
                   return jsonify({
                       'title': info.get('title'),
@@ -60,12 +68,18 @@ jobs:
           def download():
               data = request.get_json()
               url = data.get('url')
+              
               ydl_opts = {
                   'format': 'best',
                   'outtmpl': 'video.%(ext)s',
                   'quiet': True
               }
-              if os.path.exists('video.mp4'): os.remove('video.mp4')
+              if os.path.exists('cookies.txt'):
+                  ydl_opts['cookiefile'] = 'cookies.txt'
+
+              if os.path.exists('video.mp4'): 
+                  os.remove('video.mp4')
+                  
               with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                   info = ydl.extract_info(url, download=True)
                   filename = ydl.prepare_filename(info)
