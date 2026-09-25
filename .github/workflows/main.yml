@@ -70,6 +70,7 @@ jobs:
           from flask import Flask, request, jsonify, send_file
           import yt_dlp
           import os
+          import glob
 
           app = Flask(__name__)
 
@@ -85,7 +86,9 @@ jobs:
                   'user_agent': MOBILE_UA,
                   'extractor_args': {
                       'youtube': {
-                          'client': ['mweb'] # Force mobile web player API endpoints
+                          # Falls back through trusted mobile/app clients that bypass standard data center IP checks
+                          'client': ['android_embedded', 'android_vr', 'mweb', 'tvhtml5'],
+                          'skip': ['hls', 'dash']
                       }
                   }
               }
@@ -112,7 +115,9 @@ jobs:
                   'user_agent': MOBILE_UA,
                   'extractor_args': {
                       'youtube': {
-                          'client': ['mweb'] # Force mobile web player API endpoints
+                          # Falls back through trusted mobile/app clients that bypass standard data center IP checks
+                          'client': ['android_embedded', 'android_vr', 'mweb', 'tvhtml5'],
+                          'skip': ['hls', 'dash']
                       }
                   }
               }
