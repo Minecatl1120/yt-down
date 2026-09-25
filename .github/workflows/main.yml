@@ -37,7 +37,33 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
-          echo "$YT_COOKIES" > cookies.txt
+          # 1. Format and repair cookies dynamically from the Secret
+          python3 -c "
+          import os, re
+          raw = os.getenv('YT_COOKIES', '')
+          
+          # Force lines to separate correctly
+          lines = raw.replace('\r\n', '\n').split('\n')
+          cleaned_lines = []
+          
+          for line in lines:
+              # Skip empty lines or existing valid comments
+              if not line.strip():
+                  continue
+              if line.startswith('#'):
+                  cleaned_lines.append(line)
+                  continue
+                  
+              # Replace spaces with a single tab character to fix Netscape format
+              tokens = re.split(r'\s+', line.strip())
+              if len(tokens) >= 7:
+                  cleaned_lines.append('\t'.join(tokens[:7]))
+          
+          # Write with the mandatory Netscape Header
+          with open('cookies.txt', 'w', encoding='utf-8') as f:
+              f.write('# Netscape HTTP Cookie File\n')
+              f.write('\n'.join(cleaned_lines) + '\n')
+          "
           
           # 1. Start the Flask background server
           cat << 'EOF' > app.py
