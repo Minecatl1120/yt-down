@@ -5,7 +5,7 @@ on:
 
 permissions:
   contents: write
-  
+
 jobs:
   run-server:
     runs-on: ubuntu-latest
@@ -46,11 +46,11 @@ jobs:
           python3 -c "
           import os, re
           raw = os.getenv('YT_COOKIES', '')
-          
+
           # Force lines to separate correctly
           lines = raw.replace('\r\n', '\n').split('\n')
           cleaned_lines = []
-          
+
           for line in lines:
               # Skip empty lines or existing valid comments
               if not line.strip():
@@ -58,35 +58,41 @@ jobs:
               if line.startswith('#'):
                   cleaned_lines.append(line)
                   continue
-                  
+
               # Replace spaces with a single tab character to fix Netscape format
               tokens = re.split(r'\s+', line.strip())
               if len(tokens) >= 7:
                   cleaned_lines.append('\t'.join(tokens[:7]))
-          
+
           # Write with the mandatory Netscape Header
           with open('cookies.txt', 'w', encoding='utf-8') as f:
               f.write('# Netscape HTTP Cookie File\n')
               f.write('\n'.join(cleaned_lines) + '\n')
           "
-          
+
           # 2. Start the Flask background server
           cat << 'EOF' > app.py
           from flask import Flask, request, jsonify, send_file
           import yt_dlp
           import os
           import glob
+          import subprocess
+          import re
 
           app = Flask(__name__)
+
+          def sanitize_filename(name):
+              # Remove characters that are invalid in most filesystems
+              return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
           @app.route('/info', methods=['POST'])
           def get_info():
               data = request.get_json()
               url = data.get('url')
-              
+
               ydl_opts = {
                   'quiet': True,
-                  'js_runtimes': {'deno': {}}  # Fixed: Configured as a dictionary layout to prevent structural runtime crashes
+                  'js_runtimes': {'deno': {}}
               }
               if os.path.exists('cookies.txt'):
                   ydl_opts['cookiefile'] = 'cookies.txt'
@@ -106,42 +112,85 @@ jobs:
           def download():
               data = request.get_json()
               url = data.get('url')
-              
-              ydl_opts = {
-                  'format': 'best',
-                  'outtmpl': 'video.%(ext)s',
-                  'quiet': True,
-                  'js_runtimes': {'deno': {}}  # Fixed: Configured as a dictionary layout to prevent structural runtime crashes
-              }
-              if os.path.exists('cookies.txt'):
-                  ydl_opts['cookiefile'] = 'cookies.txt'
+              format_type = str(data.get('format', 'mp3')).lower()
 
-              # Fixed: Use glob to clear out ALL existing video variations (*.mp4, *.mkv, *.webm) to stop duplicate file write errors
+              # Clean out old files
               for old_file in glob.glob('video.*'):
                   try:
                       os.remove(old_file)
                   except:
                       pass
-                  
+
+              for old_file in glob.glob('audio.*'):
+                  try:
+                      os.remove(old_file)
+                  except:
+                      pass
+
+              ydl_opts = {
+                  'format': 'best',
+                  'outtmpl': 'video.%(ext)s',
+                  'quiet': True,
+                  'js_runtimes': {'deno': {}}
+              }
+
+              if os.path.exists('cookies.txt'):
+                  ydl_opts['cookiefile'] = 'cookies.txt'
+
               try:
                   with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                       info = ydl.extract_info(url, download=True)
-                      filename = ydl.prepare_filename(info)
-                      return send_file(filename, as_attachment=True)
+                      downloaded_file = ydl.prepare_filename(info)
+                      video_title = info.get('title', 'download')
+
+                  safe_title = sanitize_filename(video_title)
+
+                  # Convert to MP3 if requested
+                  if format_type == 'mp3':
+                      mp3_filename = f'{safe_title}.mp3'
+
+                      try:
+                          subprocess.run([
+                              'ffmpeg',
+                              '-i', downloaded_file,
+                              '-vn',
+                              '-ar', '44100',
+                              '-ac', '2',
+                              '-b:a', '192k',
+                              mp3_filename,
+                              '-y'
+                          ], check=True, capture_output=True, timeout=600)
+                      except subprocess.CalledProcessError as e:
+                          return jsonify({'error': f'FFmpeg conversion failed: {e.stderr.decode(errors="ignore") or str(e)}'}), 500
+
+                      # Remove original downloaded file after conversion
+                      if os.path.exists(downloaded_file):
+                          try:
+                              os.remove(downloaded_file)
+                          except:
+                              pass
+
+                      return send_file(mp3_filename, as_attachment=True, download_name=mp3_filename)
+
+                  # Otherwise return original video with title-based filename
+                  file_ext = os.path.splitext(downloaded_file)[1].lstrip('.')
+                  video_filename = f'{safe_title}.{file_ext}'
+                  return send_file(downloaded_file, as_attachment=True, download_name=video_filename)
+
               except Exception as e:
                   return jsonify({'error': str(e)}), 500
 
           if __name__ == '__main__':
               app.run(port=8080)
           EOF
-          
+
           python3 app.py &
           sleep 3
 
           # 3. Open Cloudflared Quick Tunnel and capture the dynamic URL
           cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
           sleep 8
-          
+
           # Extract the unique .trycloudflare.com address from the logs
           TUNNEL_URL=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" tunnel.log | head -n 1)
           echo "Tunnel Link Discovered: $TUNNEL_URL"
