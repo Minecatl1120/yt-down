@@ -86,7 +86,7 @@ jobs:
               
               ydl_opts = {
                   'quiet': True,
-                  'js_runtimes': 'deno'  # Enforce deno runtime to pass EJS evaluation
+                  'js_runtimes': {'deno': {}}  # Fixed: Configured as a dictionary layout to prevent structural runtime crashes
               }
               if os.path.exists('cookies.txt'):
                   ydl_opts['cookiefile'] = 'cookies.txt'
@@ -111,13 +111,17 @@ jobs:
                   'format': 'best',
                   'outtmpl': 'video.%(ext)s',
                   'quiet': True,
-                  'js_runtimes': 'deno'  # Enforce deno runtime to pass EJS evaluation
+                  'js_runtimes': {'deno': {}}  # Fixed: Configured as a dictionary layout to prevent structural runtime crashes
               }
               if os.path.exists('cookies.txt'):
                   ydl_opts['cookiefile'] = 'cookies.txt'
 
-              if os.path.exists('video.mp4'): 
-                  os.remove('video.mp4')
+              # Fixed: Use glob to clear out ALL existing video variations (*.mp4, *.mkv, *.webm) to stop duplicate file write errors
+              for old_file in glob.glob('video.*'):
+                  try:
+                      os.remove(old_file)
+                  except:
+                      pass
                   
               try:
                   with yt_dlp.YoutubeDL(ydl_opts) as ydl:
