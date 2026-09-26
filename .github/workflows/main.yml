@@ -16,7 +16,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
+
+      - name: Install Deno (Required for yt-dlp EJS challenge solver)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
 
       - name: Install System Dependencies
         run: |
@@ -25,7 +30,7 @@ jobs:
 
       - name: Install Python Packages
         run: |
-          pip install flask yt-dlp requests
+          pip install flask "yt-dlp[default]" requests
 
       - name: Install Cloudflared
         run: |
@@ -80,7 +85,8 @@ jobs:
               url = data.get('url')
               
               ydl_opts = {
-                  'quiet': True
+                  'quiet': True,
+                  'js_runtimes': 'deno'  # Enforce deno runtime to pass EJS evaluation
               }
               if os.path.exists('cookies.txt'):
                   ydl_opts['cookiefile'] = 'cookies.txt'
@@ -104,7 +110,8 @@ jobs:
               ydl_opts = {
                   'format': 'best',
                   'outtmpl': 'video.%(ext)s',
-                  'quiet': True
+                  'quiet': True,
+                  'js_runtimes': 'deno'  # Enforce deno runtime to pass EJS evaluation
               }
               if os.path.exists('cookies.txt'):
                   ydl_opts['cookiefile'] = 'cookies.txt'
