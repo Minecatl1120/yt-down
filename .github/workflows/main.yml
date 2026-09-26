@@ -25,8 +25,7 @@ jobs:
 
       - name: Install Python Packages
         run: |
-          # Added yt-dlp-youtube-oauth2 package to manage tv/device auth flows
-          pip install flask yt-dlp requests yt-dlp-youtube-oauth2
+          pip install flask yt-dlp requests
 
       - name: Install Cloudflared
         run: |
@@ -66,7 +65,7 @@ jobs:
               f.write('\n'.join(cleaned_lines) + '\n')
           "
           
-          # 1. Start the Flask background server
+          # 2. Start the Flask background server
           cat << 'EOF' > app.py
           from flask import Flask, request, jsonify, send_file
           import yt_dlp
@@ -80,11 +79,8 @@ jobs:
               data = request.get_json()
               url = data.get('url')
               
-              # Removed conflicting mobile user-agent and client array overrides
               ydl_opts = {
-                  'quiet': True,
-                  'username': 'oauth2', # This instructs the oauth plugin to execute
-                  'password': ''
+                  'quiet': True
               }
               if os.path.exists('cookies.txt'):
                   ydl_opts['cookiefile'] = 'cookies.txt'
@@ -98,27 +94,17 @@ jobs:
                           'thumbnail': info.get('thumbnail')
                       })
               except Exception as e:
-                  err_msg = str(e)
-                  # If a code needs to be verified, pass the instructions safely to your Apps Script
-                  if "enter code" in err_msg.lower() or "go to" in err_msg.lower():
-                      return jsonify({
-                          'status': 'auth_required',
-                          'instructions': err_msg.strip()
-                      }), 401
-                  return jsonify({'error': err_msg}), 500
+                  return jsonify({'error': str(e)}), 500
 
           @app.route('/download', methods=['POST'])
           def download():
               data = request.get_json()
               url = data.get('url')
               
-              # Removed conflicting mobile user-agent and client array overrides
               ydl_opts = {
                   'format': 'best',
                   'outtmpl': 'video.%(ext)s',
-                  'quiet': True,
-                  'username': 'oauth2', # This instructs the oauth plugin to execute
-                  'password': ''
+                  'quiet': True
               }
               if os.path.exists('cookies.txt'):
                   ydl_opts['cookiefile'] = 'cookies.txt'
@@ -132,13 +118,7 @@ jobs:
                       filename = ydl.prepare_filename(info)
                       return send_file(filename, as_attachment=True)
               except Exception as e:
-                  err_msg = str(e)
-                  if "enter code" in err_msg.lower() or "go to" in err_msg.lower():
-                      return jsonify({
-                          'status': 'auth_required',
-                          'instructions': err_msg.strip()
-                      }), 401
-                  return jsonify({'error': err_msg}), 500
+                  return jsonify({'error': str(e)}), 500
 
           if __name__ == '__main__':
               app.run(port=8080)
@@ -147,7 +127,7 @@ jobs:
           python3 app.py &
           sleep 3
 
-          # 2. Open Cloudflared Quick Tunnel and capture the dynamic URL
+          # 3. Open Cloudflared Quick Tunnel and capture the dynamic URL
           cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
           sleep 8
           
@@ -156,12 +136,12 @@ jobs:
           echo "Tunnel Link Discovered: $TUNNEL_URL"
           echo "$TUNNEL_URL" > tunnel_url.txt
 
-          # 3. Force-push the updated text file back to GitHub so Apps Script can read it
+          # 4. Force-push the updated text file back to GitHub so Apps Script can read it
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git add tunnel_url.txt
           git commit -m "Update active server tunnel link" | true
           git push origin HEAD:${{ github.ref }} | true
 
-          # 4. Keep the job alive for 6 hours (GitHub's maximum job lifetime)
+          # 5. Keep the job alive for 6 hours (GitHub's maximum job lifetime)
           sleep 21600
