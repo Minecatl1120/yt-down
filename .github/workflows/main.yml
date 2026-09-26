@@ -170,12 +170,19 @@ jobs:
                           except:
                               pass
 
-                      return send_file(mp3_filename, as_attachment=True, download_name=mp3_filename)
+                      # Create response and expose the custom filename header to Apps Script
+                      response = send_file(mp3_filename, as_attachment=True, download_name=mp3_filename)
+                      response.headers['X-File-Name'] = mp3_filename
+                      return response
 
                   # Otherwise return original video with title-based filename
                   file_ext = os.path.splitext(downloaded_file)[1].lstrip('.')
                   video_filename = f'{safe_title}.{file_ext}'
-                  return send_file(downloaded_file, as_attachment=True, download_name=video_filename)
+                  
+                  # Create response and expose the custom filename header to Apps Script
+                  response = send_file(downloaded_file, as_attachment=True, download_name=video_filename)
+                  response.headers['X-File-Name'] = video_filename
+                  return response
 
               except Exception as e:
                   return jsonify({'error': str(e)}), 500
