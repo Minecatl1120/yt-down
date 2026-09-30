@@ -1,0 +1,238 @@
+name: YouTube Remote Downloader Server
+
+on:
+  workflow_dispatch: # Allows you to trigger this manually
+
+permissions:
+  contents: write
+
+jobs:
+  run-server:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Deno (Required for yt-dlp EJS challenge solver)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Packages
+        run: |
+          pip install flask "yt-dlp[default]" requests
+
+      - name: Install Cloudflared
+        run: |
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+
+      - name: Start Flask App and Cloudflare Tunnel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: |
+          # 1. Format and repair cookies dynamically from the Secret
+          python3 -c "
+          import os, re
+          raw = os.getenv('YT_COOKIES', '')
+
+          # Force lines to separate correctly
+          lines = raw.replace('\r\n', '\n').split('\n')
+          cleaned_lines = []
+
+          for line in lines:
+              # Skip empty lines or existing valid comments
+              if not line.strip():
+                  continue
+              if line.startswith('#'):
+                  cleaned_lines.append(line)
+                  continue
+
+              # Replace spaces with a single tab character to fix Netscape format
+              tokens = re.split(r'\s+', line.strip())
+              if len(tokens) >= 7:
+                  cleaned_lines.append('\t'.join(tokens[:7]))
+
+          # Write with the mandatory Netscape Header
+          with open('cookies.txt', 'w', encoding='utf-8') as f:
+              f.write('# Netscape HTTP Cookie File\n')
+              f.write('\n'.join(cleaned_lines) + '\n')
+          "
+
+          # 2. Start the Flask background server
+          cat << 'EOF' > app.py
+          from flask import Flask, request, jsonify, send_file
+          import yt_dlp
+          import os
+          import glob
+          import subprocess
+          import re
+
+          app = Flask(__name__)
+
+          def sanitize_filename(name):
+              # Remove characters that are invalid in most filesystems
+              return re.sub(r'[<>:"/\\|?*]', '', name).strip()
+
+          @app.route('/info', methods=['POST'])
+          def get_info():
+              data = request.get_json()
+              url = data.get('url')
+
+              ydl_opts = {
+                  'quiet': True,
+                  'js_runtimes': {'deno': {}}
+              }
+              if os.path.exists('cookies.txt'):
+                  ydl_opts['cookiefile'] = 'cookies.txt'
+
+              try:
+                  with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                      info = ydl.extract_info(url, download=False)
+                      return jsonify({
+                          'title': info.get('title'),
+                          'uploader': info.get('uploader'),
+                          'thumbnail': info.get('thumbnail')
+                      })
+              except Exception as e:
+                  return jsonify({'error': str(e)}), 500
+
+          @app.route('/download', methods=['POST'])
+          def download():
+              data = request.get_json()
+              url = data.get('url')
+              format_type = str(data.get('format', 'mp3')).lower()
+
+              # Clean out old files from previous runs
+              for pattern in ['video.*', 'audio.*', '*.mp3', '*.mp4', '*.mkv', '*.m4a', '*.jpg', '*.webp']:
+                  for old_file in glob.glob(pattern):
+                      try:
+                          os.remove(old_file)
+                      except:
+                          pass
+
+              # Configure base options
+              ydl_opts = {
+                  'quiet': True,
+                  'js_runtimes': {'deno': {}},
+                  # Download thumbnail for embedding
+                  'writethumbnail': True,
+              }
+
+              if os.path.exists('cookies.txt'):
+                  ydl_opts['cookiefile'] = 'cookies.txt'
+
+              if format_type == 'mp3':
+                  # Tell yt-dlp to output to a known temp template name before conversion
+                  ydl_opts['outtmpl'] = 'audio.%(ext)s'
+                  ydl_opts['postprocessors'] = [
+                      # Step A: Extract high quality audio from video
+                      {
+                          'key': 'FFmpegExtractAudio',
+                          'preferredcodec': 'mp3',
+                          'preferredquality': '192',
+                      },
+                      # Step B: Convert WebP/unsupported thumbnails to clear JPGs
+                      {
+                          'key': 'FFmpegThumbnailsConvertor',
+                          'format': 'jpg',
+                      },
+                      # Step C: Embed the downloaded image file into the MP3 tags
+                      {
+                          'key': 'EmbedThumbnail',
+                          'already_have_thumbnail': False,
+                      },
+                      # Step D: Add track metadata (Title, Artist info) if available
+                      {
+                          'key': 'FFmpegMetadata',
+                          'add_metadata': True,
+                      }
+                  ]
+              else:
+                  # For standard video files (MP4/MKV)
+                  ydl_opts['outtmpl'] = 'video.%(ext)s'
+                  ydl_opts['postprocessors'] = [
+                      {
+                          'key': 'FFmpegThumbnailsConvertor',
+                          'format': 'jpg',
+                      },
+                      # Embeds thumbnail image directly into video container metadata stream
+                      {
+                          'key': 'EmbedThumbnail',
+                          'already_have_thumbnail': False,
+                      },
+                      {
+                          'key': 'FFmpegMetadata',
+                          'add_metadata': True,
+                      }
+                  ]
+
+              try:
+                  with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                      info = ydl.extract_info(url, download=True)
+                      video_title = info.get('title', 'download')
+                  
+                  safe_title = sanitize_filename(video_title)
+
+                  # Discover what final file yt-dlp left for us after processing
+                  if format_type == 'mp3':
+                      # After postprocessors run, audio.ext becomes audio.mp3
+                      final_processed_file = 'audio.mp3'
+                      download_name = f'{safe_title}.mp3'
+                  else:
+                      # Find whatever video format yt-dlp combined it into
+                      matching_videos = glob.glob('video.*')
+                      if not matching_videos:
+                          return jsonify({'error': 'Processed video file not found.'}), 500
+                      final_processed_file = matching_videos[0]
+                      file_ext = os.path.splitext(final_processed_file)[1].lstrip('.')
+                      download_name = f'{safe_title}.{file_ext}'
+
+                  if not os.path.exists(final_processed_file):
+                      return jsonify({'error': 'Processing completed but final file was missing.'}), 500
+
+                  # Send back the tagged file, passing the custom header for Google Apps Script to grab
+                  response = send_file(final_processed_file, as_attachment=True, download_name=download_name)
+                  response.headers['X-File-Name'] = download_name
+                  return response
+
+              except Exception as e:
+                  return jsonify({'error': str(e)}), 500
+
+
+          if __name__ == '__main__':
+              app.run(port=8080)
+          EOF
+
+          python3 app.py &
+          sleep 3
+
+          # 3. Open Cloudflared Quick Tunnel and capture the dynamic URL
+          cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
+          sleep 8
+
+          # Extract the unique .trycloudflare.com address from the logs
+          TUNNEL_URL=$(grep -oE "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" tunnel.log | head -n 1)
+          echo "Tunnel Link Discovered: $TUNNEL_URL"
+          echo "$TUNNEL_URL" > tunnel_url.txt
+
+          # 4. Force-push the updated text file back to GitHub so Apps Script can read it
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add tunnel_url.txt
+          git commit -m "Update active server tunnel link" | true
+          git push origin HEAD:${{ github.ref }} | true
+
+          # 5. Keep the job alive for 6 hours (GitHub's maximum job lifetime)
+          sleep 21600
