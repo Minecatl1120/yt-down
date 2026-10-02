@@ -85,6 +85,15 @@ jobs:
               # Remove characters that are invalid in most filesystems
               return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
+          @app.route('/', methods=['GET'])
+          def health_check():
+              return jsonify({
+                  "status": "healthy",
+                  "service": "yt-dlp-downloader",
+                  "yt_dlp_version": yt_dlp.version.__version__
+              }), 200
+
+
           @app.route('/info', methods=['POST'])
           def get_info():
               data = request.get_json()
