@@ -78,13 +78,18 @@ jobs:
           import glob
           import subprocess
           import re
+          from urllib.parse import quote
 
           app = Flask(__name__)
 
           def sanitize_filename(name):
-              # Remove characters that are invalid in most filesystems
-              return re.sub(r'[<>:"/\\|?*]', '', name).strip()
-
+            # 1. Replace curly "smart quotes" with regular straight quotes
+              name = name.replace('\u201c', '"').replace('\u201d', '"')
+              name = name.replace('\u2018', "'").replace('\u2019', "'")
+              name = re.sub(r'[<>:"/\\|?*]', '', name)
+              latin1_safe_name = name.encode('latin-1', errors='ignore').decode('latin-1')
+              return latin1_safe_name.strip()
+          
           @app.route('/', methods=['GET'])
           def health_check():
               return jsonify({
